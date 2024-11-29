@@ -143,9 +143,16 @@ def evaluate_model_with_few_shot_prompt(
     return test_predictions, test_labels
 
 
-def format_prompt_with_context(few_shot_examples):
+def format_prompt_with_context(few_shot_examples, tokenizer):
     """
     Generate a few-shot prompt using enriched statements with simplified context.
+
+    Args:
+        few_shot_examples (list): Few-shot examples from the dataset.
+        tokenizer: The tokenizer used to decode the input IDs.
+
+    Returns:
+        str: The formatted few-shot prompt.
     """
     prompt = ""
     for example in few_shot_examples:
