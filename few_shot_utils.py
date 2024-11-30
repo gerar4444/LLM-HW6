@@ -60,6 +60,7 @@ def format_prompt(few_shot_examples, tokenizer):
     return prompt_text
 
 
+
 def evaluate_model_with_few_shot_prompt(
     model,
     tokenizer,
@@ -87,21 +88,24 @@ def evaluate_model_with_few_shot_prompt(
     model.to(device)
     model.eval()
 
+    # Precompute label token IDs
     label_token_ids = [tokenizer.convert_tokens_to_ids(str(i)) for i in range(6)]
     assert all(token_id is not None for token_id in label_token_ids), "Some labels are not in the vocabulary!"
     print("Label Token IDs:", label_token_ids)
 
-    tokenized_input = tokenizer(few_shot_prompt, truncation=False, return_tensors="pt")
-    print("Prompt tokenized length:", len(tokenized_input["input_ids"][0]))
+    # Pre-tokenize the few-shot prompt
+    tokenized_prompt = tokenizer(few_shot_prompt, truncation=False, return_tensors="pt")
+    prompt_input_ids = tokenized_prompt["input_ids"].to(device)
 
     test_predictions, test_labels = [], []
 
-    with torch.no_grad():
+    with torch.no_grad():  # Disable gradient tracking
         for batch in test_loader:
             for i in range(len(batch["input_ids"])):
                 if len(test_predictions) >= max_examples:
                     break
 
+                # Prepare the test input
                 statement = batch["statement"][i]
                 subject = batch.get("subject", ["Unknown"])[i]
                 speaker = batch.get("speaker", ["Unknown"])[i]
@@ -117,6 +121,7 @@ def evaluate_model_with_few_shot_prompt(
                     f"Statement: \"{statement}\" | Label:"
                 )
 
+                # Tokenize the test input
                 test_input = tokenizer(
                     test_input_text,
                     truncation=True,
@@ -126,21 +131,25 @@ def evaluate_model_with_few_shot_prompt(
 
                 input_ids = test_input["input_ids"].to(device)
 
+                # Forward pass
                 outputs = model(input_ids=input_ids)
-                logits = outputs.logits  # [batch_size, seq_len, vocab_size]
+                logits = outputs.logits
 
-                label_logits = logits[:, -1, :]  # [batch_size, vocab_size]
+                # Extract logits for label tokens
+                label_logits = logits[:, -1, label_token_ids]  # Gather logits for label tokens
+                label_log_likelihoods = F.log_softmax(label_logits, dim=-1)[0]
 
-                label_log_likelihoods = torch.tensor(
-                    [F.log_softmax(label_logits, dim=-1)[0, token_id].item() for token_id in label_token_ids],
-                    device=device
-                )
-
+                # Make prediction
                 prediction = torch.argmax(label_log_likelihoods).item()
                 test_predictions.append(prediction)
                 test_labels.append(batch["label"][i].item())
 
+                # Free GPU memory
+                del input_ids, outputs, logits, label_logits, label_log_likelihoods
+                torch.cuda.empty_cache()
+
     return test_predictions, test_labels
+
 
 
 def format_prompt_with_context(few_shot_examples, tokenizer):
